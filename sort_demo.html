@@ -1,0 +1,855 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>金属活动性排序 - 置换反应可视化</title>
+<style>
+  /* ============================================================
+     基础重置 & 全局
+     ============================================================ */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #0a0e14;
+    --surface:   #131820;
+    --border:    #252b36;
+    --text:      #e1e4ed;
+    --dim:       #6b7080;
+    --accent:    #f59e0b;
+    --green:     #4ade80;
+    --red:       #f87171;
+    --yellow:    #facc15;
+    --orange:    #fb923c;
+    --cyan:      #22d3ee;
+    --radius:    10px;
+    --shadow:    0 4px 24px rgba(0,0,0,.5);
+  }
+
+  body {
+    font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  header {
+    width: 100%;
+    max-width: 1000px;
+    padding: 28px 24px 12px;
+    text-align: center;
+  }
+  header h1 {
+    font-size: 1.9rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    background: linear-gradient(135deg, #f59e0b, #ef4444, #f59e0b);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  header p {
+    color: var(--dim);
+    margin-top: 4px;
+    font-size: 0.9rem;
+  }
+
+  main {
+    width: 100%;
+    max-width: 1000px;
+    padding: 0 24px 48px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 22px;
+    box-shadow: var(--shadow);
+  }
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .card-header h2 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* ============================================================
+     画布
+     ============================================================ */
+  .canvas-wrap {
+    position: relative;
+    width: 100%;
+    height: 340px;
+    background: #070a0f;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .canvas-wrap canvas { width: 100%; height: 100%; display: block; }
+
+  /* ---- 反应式弹幕层 ---- */
+  .reaction-overlay {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none;
+    z-index: 10;
+  }
+  .reaction-bubble {
+    position: absolute;
+    font-family: 'Courier New', 'PingFang SC', monospace;
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: #fbbf24;
+    background: rgba(0,0,0,.85);
+    border: 1px solid #f59e0b;
+    border-radius: 6px;
+    padding: 4px 10px;
+    white-space: nowrap;
+    animation: bubbleUp 1.2s ease-out forwards;
+    text-shadow: 0 0 8px rgba(251,191,36,.6);
+    box-shadow: 0 0 16px rgba(245,158,11,.3);
+  }
+  @keyframes bubbleUp {
+    0%   { opacity: 1; transform: translateY(0) scale(0.6); }
+    30%  { opacity: 1; transform: translateY(-18px) scale(1.1); }
+    100% { opacity: 0; transform: translateY(-60px) scale(0.8); }
+  }
+
+  /* ---- 火花粒子 ---- */
+  .spark {
+    position: absolute;
+    width: 4px; height: 4px;
+    border-radius: 50%;
+    pointer-events: none;
+    animation: sparkFly 0.7s ease-out forwards;
+  }
+  @keyframes sparkFly {
+    0%   { opacity: 1; transform: translate(0,0) scale(1); }
+    100% { opacity: 0; transform: translate(var(--dx), var(--dy)) scale(0); }
+  }
+
+  /* ============================================================
+     反应日志
+     ============================================================ */
+  .reaction-log {
+    max-height: 100px;
+    overflow-y: auto;
+    font-size: 0.78rem;
+    font-family: 'Courier New', 'PingFang SC', monospace;
+    color: var(--dim);
+    margin-top: 10px;
+    padding: 8px 12px;
+    background: #0b0d13;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    line-height: 1.7;
+  }
+  .reaction-log .entry {
+    animation: fadeInLog 0.3s ease-out;
+  }
+  .reaction-log .arrow { color: #f59e0b; }
+  .reaction-log .metal  { color: #fbbf24; font-weight: 600; }
+  @keyframes fadeInLog {
+    0% { opacity: 0; transform: translateX(-8px); }
+    100% { opacity: 1; transform: translateX(0); }
+  }
+
+  /* ============================================================
+     控制
+     ============================================================ */
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .controls label {
+    font-size: 0.8rem;
+    color: var(--dim);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+  }
+  .controls input[type=range] { width: 90px; accent-color: var(--accent); }
+  .controls .val { color: var(--accent); font-weight: 600; font-size: 0.8rem; min-width: 2.2em; text-align: right; }
+
+  button, .btn {
+    font-family: inherit;
+    font-size: 0.83rem;
+    font-weight: 600;
+    padding: 8px 18px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+  .btn-primary { background: #f59e0b; color: #0a0e14; border-color: #f59e0b; }
+  .btn-primary:hover { filter: brightness(1.15); }
+  .btn-primary:disabled { opacity: .35; cursor: not-allowed; filter: none; }
+  .btn-outline { background: transparent; color: #f59e0b; border-color: #f59e0b; }
+  .btn-outline:hover { background: rgba(245,158,11,.1); }
+  .btn-danger { background: transparent; color: var(--red); border-color: var(--red); }
+  .btn-danger:hover { background: rgba(248,113,113,.1); }
+
+  .algo-btn {
+    font-size: 0.85rem;
+    padding: 10px 20px;
+    border: 2px solid var(--border);
+    background: transparent;
+    color: var(--dim);
+    font-weight: 600;
+    border-radius: 10px;
+  }
+  .algo-btn.active { border-color: #f59e0b; color: #f59e0b; background: rgba(245,158,11,.08); }
+
+  /* ============================================================
+     图例 & 统计
+     ============================================================ */
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 0.75rem; color: var(--dim); }
+  .legend-item { display: flex; align-items: center; gap: 5px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 3px; }
+  .stats { display: flex; gap: 20px; flex-wrap: wrap; font-size: 0.8rem; color: var(--dim); margin-top: 12px; }
+  .stats span { color: var(--text); font-weight: 600; }
+
+  /* ---- 活动性指示 ---- */
+  .reactivity-label {
+    position: absolute;
+    right: 8px;
+    font-size: 0.7rem;
+    color: var(--dim);
+    writing-mode: vertical-rl;
+    letter-spacing: 0.1em;
+  }
+
+  @media (max-width: 640px) {
+    header h1 { font-size: 1.3rem; }
+    .canvas-wrap { height: 240px; }
+    .algo-btn { padding: 8px 12px; font-size: 0.78rem; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>⚗ 金属活动性排序 — 置换反应可视化</h1>
+  <p>快速排序 · 归并排序 ｜ 按活动性从强到弱排列 · 置换反应特效</p>
+</header>
+
+<main>
+
+  <!-- ====== 算法选择 & 操作 ====== -->
+  <div class="card" style="padding: 14px 22px;">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between;">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="algo-btn active" data-algo="quick" id="btn-quick">⚡ 快速排序</button>
+        <button class="algo-btn" data-algo="merge" id="btn-merge">🧩 归并排序</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-primary" id="btn-start">▶ 开始排序</button>
+        <button class="btn btn-outline"  id="btn-reset">↺ 重新打乱</button>
+        <button class="btn btn-danger"   id="btn-stop">■ 停止</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== 主画布 ====== -->
+  <div class="card">
+    <div class="card-header">
+      <h2><span id="algo-icon">⚡</span><span id="algo-title">快速排序</span></h2>
+      <div class="legend">
+        <div class="legend-item"><span class="legend-dot" style="background:#475569"></span>待排序</div>
+        <div class="legend-item"><span class="legend-dot" style="background:#facc15"></span>当前区间</div>
+        <div class="legend-item"><span class="legend-dot" style="background:#f87171"></span>枢轴/交换</div>
+        <div class="legend-item"><span class="legend-dot" style="background:#4ade80"></span>已排好</div>
+        <div class="legend-item"><span class="legend-dot" style="background:#22d3ee"></span>合并中</div>
+      </div>
+    </div>
+
+    <div class="canvas-wrap" id="canvas-wrap">
+      <canvas id="canvas"></canvas>
+      <div class="reaction-overlay" id="reaction-overlay"></div>
+    </div>
+
+    <!-- 反应日志 -->
+    <div class="reaction-log" id="reaction-log">
+      <span style="color:#6b7080;">🔬 反应日志 — 等待排序开始...</span>
+    </div>
+
+    <!-- 统计 -->
+    <div class="stats">
+      <div>元素数量: <span id="stat-size">14</span></div>
+      <div>比较次数: <span id="stat-comps">0</span></div>
+      <div>置换反应: <span id="stat-swaps">0</span></div>
+      <div>耗时: <span id="stat-time">--</span></div>
+    </div>
+  </div>
+
+  <!-- ====== 参数调节 ====== -->
+  <div class="card">
+    <div class="card-header"><h2>⚙ 参数调节</h2></div>
+    <div class="controls">
+      <label>元素数量 <input type="range" id="size-slider" min="8" max="21" value="21" step="1">
+        <span class="val" id="size-val">21</span>
+      </label>
+      <label>动画速度 <input type="range" id="speed-slider" min="1" max="10" value="5" step="1">
+        <span class="val" id="speed-val">5</span>
+      </label>
+    </div>
+  </div>
+
+</main>
+
+<script>
+/* ============================================================
+   金属元素数据 — 按活动性从强到弱
+   ============================================================ */
+// 按标准电极电势 E°(V) 从负到正排列（还原性从强到弱）
+// Li(-3.04) > K(-2.93) > Ba(-2.90) > Ca(-2.87) > Na(-2.71)
+// > Mg(-2.37) > Al(-1.66) > Mn(-1.18) > Zn(-0.76) > Cr(-0.74)
+// > Fe(-0.44) > Cd(-0.40) > Co(-0.28) > Ni(-0.25)
+// > Sn(-0.14) > Pb(-0.13) > Cu(+0.34) > Ag(+0.80) > Hg(+0.85) > Pt(+1.20) > Au(+1.50)
+const ALL_METALS = [
+  { symbol: 'Li', name: '锂', reactivity: 1,  color: '#facc15', cat: '碱金属',   ion: 'Li⁺',  ch: 1 },
+  { symbol: 'K',  name: '钾', reactivity: 2,  color: '#ef4444', cat: '碱金属',   ion: 'K⁺',   ch: 1 },
+  { symbol: 'Ba', name: '钡', reactivity: 3,  color: '#f97316', cat: '碱土金属', ion: 'Ba²⁺', ch: 2 },
+  { symbol: 'Ca', name: '钙', reactivity: 4,  color: '#fb923c', cat: '碱土金属', ion: 'Ca²⁺', ch: 2 },
+  { symbol: 'Na', name: '钠', reactivity: 5,  color: '#eab308', cat: '碱金属',   ion: 'Na⁺',  ch: 1 },
+  { symbol: 'Mg', name: '镁', reactivity: 6,  color: '#84cc16', cat: '碱土金属', ion: 'Mg²⁺', ch: 2 },
+  { symbol: 'Al', name: '铝', reactivity: 7,  color: '#22c55e', cat: '贫金属',   ion: 'Al³⁺', ch: 3 },
+  { symbol: 'Mn', name: '锰', reactivity: 8,  color: '#10b981', cat: '过渡金属', ion: 'Mn²⁺', ch: 2 },
+  { symbol: 'Zn', name: '锌', reactivity: 9,  color: '#14b8a6', cat: '过渡金属', ion: 'Zn²⁺', ch: 2 },
+  { symbol: 'Cr', name: '铬', reactivity: 10, color: '#06b6d4', cat: '过渡金属', ion: 'Cr³⁺', ch: 3 },
+  { symbol: 'Fe', name: '铁', reactivity: 11, color: '#0ea5e9', cat: '过渡金属', ion: 'Fe²⁺', ch: 2 },
+  { symbol: 'Cd', name: '镉', reactivity: 12, color: '#6366f1', cat: '过渡金属', ion: 'Cd²⁺', ch: 2 },
+  { symbol: 'Co', name: '钴', reactivity: 13, color: '#8b5cf6', cat: '过渡金属', ion: 'Co²⁺', ch: 2 },
+  { symbol: 'Ni', name: '镍', reactivity: 14, color: '#7c3aed', cat: '过渡金属', ion: 'Ni²⁺', ch: 2 },
+  { symbol: 'Sn', name: '锡', reactivity: 15, color: '#a855f7', cat: '贫金属',   ion: 'Sn²⁺', ch: 2 },
+  { symbol: 'Pb', name: '铅', reactivity: 16, color: '#d946ef', cat: '贫金属',   ion: 'Pb²⁺', ch: 2 },
+  { symbol: 'Cu', name: '铜', reactivity: 17, color: '#ec4899', cat: '过渡金属', ion: 'Cu²⁺', ch: 2 },
+  { symbol: 'Ag', name: '银', reactivity: 18, color: '#c0c0c0', cat: '过渡金属', ion: 'Ag⁺',  ch: 1 },
+  { symbol: 'Hg', name: '汞', reactivity: 19, color: '#94a3b8', cat: '过渡金属', ion: 'Hg²⁺', ch: 2 },
+  { symbol: 'Pt', name: '铂', reactivity: 20, color: '#a8a29e', cat: '贵金属',   ion: 'Pt²⁺', ch: 2 },
+  { symbol: 'Au', name: '金', reactivity: 21, color: '#fbbf24', cat: '贵金属',   ion: 'Au³⁺', ch: 3 },
+];
+
+/* ============================================================
+   DOM 引用
+   ============================================================ */
+const canvas     = document.getElementById('canvas');
+const ctx        = canvas.getContext('2d');
+const overlay    = document.getElementById('reaction-overlay');
+const reactionLog= document.getElementById('reaction-log');
+
+const btnQuick   = document.getElementById('btn-quick');
+const btnMerge   = document.getElementById('btn-merge');
+const btnStart   = document.getElementById('btn-start');
+const btnReset   = document.getElementById('btn-reset');
+const btnStop    = document.getElementById('btn-stop');
+
+const algoIcon   = document.getElementById('algo-icon');
+const algoTitle  = document.getElementById('algo-title');
+const statSize   = document.getElementById('stat-size');
+const statComps  = document.getElementById('stat-comps');
+const statSwaps  = document.getElementById('stat-swaps');
+const statTime   = document.getElementById('stat-time');
+const sizeSlider = document.getElementById('size-slider');
+const speedSlider= document.getElementById('speed-slider');
+const sizeVal    = document.getElementById('size-val');
+const speedVal   = document.getElementById('speed-val');
+
+/* ============================================================
+   状态
+   ============================================================ */
+let algorithm  = 'quick';
+let metals     = [];           // 当前金属数组 (浅拷贝自 ALL_METALS 的子集)
+let arrSize    = 21;
+let speed      = 5;
+let running    = false;
+let abortFlag  = false;
+let comparisons= 0;
+let swaps      = 0;
+let highlights = new Map();    // index -> color string
+let logLines   = [];
+
+/* ============================================================
+   工具
+   ============================================================ */
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function delayMs() { return Math.max(5, Math.floor(420 / speed)); }
+
+// Fisher-Yates 洗牌
+function shuffle(a) {
+  const b = [...a];
+  for (let i = b.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [b[i], b[j]] = [b[j], b[i]];
+  }
+  return b;
+}
+
+function buildMetals(size) {
+  return shuffle(ALL_METALS.slice(0, size));
+}
+
+/* ============================================================
+   配平工具
+   ============================================================ */
+function gcd(a, b) { return b === 0 ? a : gcd(b, a % b); }
+
+// 生成配平的置换反应方程式
+// a = 活泼金属的化合价, b = 不活泼金属的化合价
+// 通式: (b/g)·A + (a/g)·B^(b⁺) = (b/g)·A^(a⁺) + (a/g)·B↓  其中 g=gcd(a,b)
+function balancedEquation(more, less) {
+  const a = more.ch, b = less.ch;
+  const g = gcd(a, b);
+  const ca = b / g; // more 的系数
+  const cb = a / g; // less 的系数
+
+  const leftMore  = ca === 1 ? more.symbol : ca + more.symbol;
+  const leftLess  = cb === 1 ? less.ion   : cb + less.ion;
+  const rightMore = ca === 1 ? more.ion   : ca + more.ion;
+  const rightLess = cb === 1 ? less.symbol + '↓' : cb + less.symbol + '↓';
+
+  return `${leftMore} ＋ ${leftLess} → ${rightMore} ＋ ${rightLess}`;
+}
+
+/* ============================================================
+   置换反应特效
+   ============================================================ */
+function spawnReactionEffect(idxA, idxB) {
+  // 防御: 索引越界时静默跳过
+  if (idxA < 0 || idxA >= metals.length || idxB < 0 || idxB >= metals.length) return;
+  if (idxA === idxB) return;
+
+  const wrap = document.getElementById('canvas-wrap');
+  const rect = wrap.getBoundingClientRect();
+  const W = rect.width;
+  const H = rect.height;
+
+  const n = metals.length;
+  const barW = Math.max(4, (W - 16) / n - 2);
+  const gap = barW >= 8 ? 2 : 1;
+  const totalBarW = barW + gap;
+  const offsetX = (W - totalBarW * n) / 2;
+  const maxR = ALL_METALS[0].reactivity;
+  const minR = ALL_METALS[ALL_METALS.length - 1].reactivity;
+  const padY = 40;
+
+  function barCenterX(i) { return offsetX + i * totalBarW + barW / 2; }
+  function barTopY(i) {
+    const r = metals[i].reactivity;
+    const frac = (maxR - r) / (maxR - minR);
+    return H - padY - frac * (H - padY * 2);
+  }
+
+  const xA = barCenterX(idxA);
+  const yA = barTopY(idxA);
+  const xB = barCenterX(idxB);
+  const yB = barTopY(idxB);
+  const midX = (xA + xB) / 2;
+  const midY = Math.min(yA, yB) - 10;
+
+  // --- 火花粒子 ---
+  for (let p = 0; p < 15; p++) {
+    const spark = document.createElement('div');
+    spark.className = 'spark';
+    spark.style.left = midX + 'px';
+    spark.style.top  = midY + 'px';
+    spark.style.background = ['#fbbf24','#f87171','#facc15','#fb923c','#ffffff'][p % 5];
+    spark.style.setProperty('--dx', (Math.random() * 70 - 35) + 'px');
+    spark.style.setProperty('--dy', (Math.random() * -50 - 10) + 'px');
+    spark.style.width  = (2 + Math.random() * 4) + 'px';
+    spark.style.height = spark.style.width;
+    overlay.appendChild(spark);
+    setTimeout(() => spark.remove(), 750);
+  }
+
+  // --- 反应式气泡 ---
+  const mA = metals[idxA];
+  const mB = metals[idxB];
+  // 谁更活泼（reactivity 值更小）谁就能置换对方
+  const [more, less] = mA.reactivity < mB.reactivity ? [mA, mB] : [mB, mA];
+
+  const equation = balancedEquation(more, less);
+  const bubble = document.createElement('div');
+  bubble.className = 'reaction-bubble';
+  bubble.textContent = equation;
+  bubble.style.left = Math.max(4, midX - 90) + 'px';
+  bubble.style.top  = Math.max(4, midY - 10) + 'px';
+  overlay.appendChild(bubble);
+  setTimeout(() => bubble.remove(), 1300);
+
+  // --- 反应日志 ---
+  addLogLine(more, less);
+}
+
+function addLogLine(more, less) {
+  const eq = balancedEquation(more, less);
+  const line = `<span class="metal">${more.symbol}(${more.name})</span> 置换 <span class="metal">${less.symbol}(${less.name})</span> <span class="arrow">→</span> ${eq}`;
+  logLines.push(line);
+  if (logLines.length > 50) logLines.shift();
+  reactionLog.innerHTML = logLines.map(l => `<div class="entry">${l}</div>`).join('');
+  reactionLog.scrollTop = reactionLog.scrollHeight;
+}
+
+/* ============================================================
+   绘图 — 元素卡片 + 活动性柱
+   ============================================================ */
+function dpr() { return Math.min(window.devicePixelRatio || 1, 2); }
+
+function resizeCanvas() {
+  const wrap = canvas.parentElement;
+  const w = wrap.clientWidth;
+  const h = wrap.clientHeight;
+  const r = dpr();
+  canvas.width  = w * r;
+  canvas.height = h * r;
+  canvas.style.width  = w + 'px';
+  canvas.style.height = h + 'px';
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(r, r);
+}
+window.addEventListener('resize', () => { resizeCanvas(); draw(); });
+
+function draw() {
+  const W = canvas.parentElement.clientWidth;
+  const H = canvas.parentElement.clientHeight;
+  const n = metals.length;
+  if (n === 0) return;
+
+  const maxR = ALL_METALS.length; // 21
+  const minR = 1;
+  const barW = Math.max(16, (W - 16) / n - 4);
+  const gap   = 3;
+  const totalW = barW + gap;
+  const offsetX = (W - totalW * n + gap) / 2;
+  const padY = 38;
+  const chartH = H - padY * 2;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // 背景参考线
+  ctx.strokeStyle = '#1e2532';
+  ctx.lineWidth = 0.5;
+  for (let lvl = 0; lvl <= 4; lvl++) {
+    const y = padY + chartH * (lvl / 4);
+    ctx.beginPath();
+    ctx.moveTo(20, y); ctx.lineTo(W - 20, y);
+    ctx.stroke();
+  }
+
+  for (let i = 0; i < n; i++) {
+    const m = metals[i];
+    // 活动性 → 柱高: reactivity 越小(越活泼)柱越高
+    const frac = (maxR - m.reactivity) / (maxR - minR);
+    const barH = Math.max(14, frac * chartH);
+    const x = offsetX + i * totalW;
+    const y = H - padY - barH;
+
+    // 颜色
+    let color = m.color;
+    if (highlights.has(i)) color = highlights.get(i);
+
+    // 发光柱
+    const grad = ctx.createLinearGradient(x, y, x, H - padY);
+    grad.addColorStop(0, color);
+    grad.addColorStop(1, color + '44');
+    ctx.fillStyle = grad;
+
+    const radius = Math.min(4, barW / 3);
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + barW - radius, y);
+    ctx.quadraticCurveTo(x + barW, y, x + barW, y + radius);
+    ctx.lineTo(x + barW, H - padY);
+    ctx.lineTo(x, H - padY);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
+    ctx.fill();
+
+    // 柱子上的符号
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.min(13, barW * 0.7)}px Inter, PingFang SC, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(m.symbol, x + barW / 2, Math.max(y + barW / 2 + 2, barW / 2 + 4));
+
+    // 底部中文名
+    ctx.fillStyle = '#e1e4ed';
+    ctx.font = `${Math.min(10, barW * 0.5)}px PingFang SC, sans-serif`;
+    ctx.fillText(m.name, x + barW / 2, H - padY + 16);
+
+    // 活动性数值
+    ctx.fillStyle = '#6b7080';
+    ctx.font = `${Math.min(9, barW * 0.45)}px Inter, sans-serif`;
+    ctx.fillText('#' + m.reactivity, x + barW / 2, H - padY + 28);
+  }
+}
+
+async function drawAndWait(extraMs = 0) {
+  draw();
+  await sleep(delayMs() + extraMs);
+}
+
+/* ============================================================
+   快速排序
+   ============================================================ */
+async function quickSort(lo, hi) {
+  if (abortFlag) return;
+  if (lo >= hi) {
+    highlights.set(lo, '#4ade80');
+    await drawAndWait();
+    return;
+  }
+
+  for (let i = lo; i <= hi; i++) highlights.set(i, '#facc15');
+  await drawAndWait();
+
+  const mid = lo + Math.floor((hi - lo) / 2);
+  // pivot 比较的是 reactivity 值
+  const pivotVal = metals[mid].reactivity;
+  highlights.set(mid, '#f87171');
+  await drawAndWait(80);
+
+  let i = lo - 1;
+  let j = hi + 1;
+
+  while (true) {
+    do { i++; comparisons++; statComps.textContent = comparisons; }
+    while (metals[i].reactivity < pivotVal);
+    do { j--; comparisons++; statComps.textContent = comparisons; }
+    while (metals[j].reactivity > pivotVal);
+
+    if (i >= j) break;
+
+    [metals[i], metals[j]] = [metals[j], metals[i]];
+    swaps++;
+    statSwaps.textContent = swaps;
+    highlights.set(i, '#f87171');
+    highlights.set(j, '#f87171');
+    spawnReactionEffect(i, j);
+    await drawAndWait(40);
+    highlights.set(i, '#facc15');
+    highlights.set(j, '#facc15');
+  }
+
+  for (let k = lo; k <= hi; k++) highlights.delete(k);
+  await drawAndWait();
+
+  await quickSort(lo, j);
+  await quickSort(j + 1, hi);
+
+  for (let k = lo; k <= hi; k++) highlights.set(k, '#4ade80');
+  await drawAndWait(40);
+}
+
+/* ============================================================
+   归并排序
+   ============================================================ */
+async function mergeSort(lo, hi) {
+  if (abortFlag) return;
+  if (lo >= hi) {
+    highlights.set(lo, '#4ade80');
+    await drawAndWait();
+    return;
+  }
+
+  const mid = lo + Math.floor((hi - lo) / 2);
+
+  for (let i = lo; i <= hi; i++) highlights.set(i, '#facc15');
+  await drawAndWait(60);
+
+  await mergeSort(lo, mid);
+  await mergeSort(mid + 1, hi);
+
+  for (let i = lo; i <= hi; i++) highlights.set(i, '#22d3ee');
+  await drawAndWait(50);
+
+  const L = metals.slice(lo, mid + 1);
+  const R = metals.slice(mid + 1, hi + 1);
+  let iL = 0, iR = 0, k = lo;
+  // 记录 L/R 中每个元素在 metals 中的原始位置
+  const posL = []; for (let p = lo; p <= mid; p++) posL.push(p);
+  const posR = []; for (let p = mid + 1; p <= hi; p++) posR.push(p);
+
+  while (iL < L.length && iR < R.length) {
+    comparisons++;
+    statComps.textContent = comparisons;
+    if (L[iL].reactivity <= R[iR].reactivity) {
+      const srcIdx = posL[iL];
+      if (metals[k] !== L[iL] && srcIdx >= 0 && srcIdx < metals.length) {
+        spawnReactionEffect(k, srcIdx);
+      }
+      metals[k] = L[iL];
+      // 更新被移动元素的追踪位置
+      for (let x = 0; x < posL.length; x++) { if (posL[x] === k) posL[x] = srcIdx; }
+      for (let x = 0; x < posR.length; x++) { if (posR[x] === k) posR[x] = srcIdx; }
+      iL++;
+    } else {
+      const srcIdx = posR[iR];
+      if (metals[k] !== R[iR] && srcIdx >= 0 && srcIdx < metals.length) {
+        spawnReactionEffect(k, srcIdx);
+      }
+      metals[k] = R[iR];
+      for (let x = 0; x < posL.length; x++) { if (posL[x] === k) posL[x] = srcIdx; }
+      for (let x = 0; x < posR.length; x++) { if (posR[x] === k) posR[x] = srcIdx; }
+      iR++;
+    }
+    swaps++;
+    statSwaps.textContent = swaps;
+    highlights.set(k, '#22d3ee');
+    k++;
+    if (k % 2 === 0) await drawAndWait();
+  }
+  while (iL < L.length) {
+    metals[k] = L[iL];
+    highlights.set(k, '#22d3ee');
+    iL++; k++; swaps++;
+    statSwaps.textContent = swaps;
+    if (k % 2 === 0) await drawAndWait();
+  }
+  while (iR < R.length) {
+    metals[k] = R[iR];
+    highlights.set(k, '#22d3ee');
+    iR++; k++; swaps++;
+    statSwaps.textContent = swaps;
+    if (k % 2 === 0) await drawAndWait();
+  }
+  await drawAndWait();
+
+  for (let i = lo; i <= hi; i++) highlights.set(i, '#4ade80');
+  await drawAndWait(40);
+}
+
+/* ============================================================
+   运行
+   ============================================================ */
+async function runSort() {
+  if (running) return;
+  running = true;
+  abortFlag = false;
+  highlights.clear();
+  comparisons = 0; swaps = 0;
+  statComps.textContent = '0';
+  statSwaps.textContent = '0';
+  statTime.textContent = '--';
+  logLines = [];
+  reactionLog.innerHTML = '<span style="color:#6b7080;">🔬 反应日志 — 排序进行中...</span>';
+
+  btnStart.disabled = true;
+  btnReset.disabled = true;
+  sizeSlider.disabled = true;
+  draw();
+
+  const t0 = performance.now();
+
+  if (algorithm === 'quick') {
+    await quickSort(0, metals.length - 1);
+  } else {
+    await mergeSort(0, metals.length - 1);
+  }
+
+  const elapsed = performance.now() - t0;
+
+  if (!abortFlag) {
+    for (let i = 0; i < metals.length; i++) highlights.set(i, '#4ade80');
+    draw();
+    statTime.textContent = elapsed.toFixed(1) + ' ms';
+    reactionLog.innerHTML = (logLines.length > 0 ? logLines.map(l => `<div class="entry">${l}</div>`).join('')
+      : '<span style="color:#4ade80;">✓ 排序完成，数组已有序无需置换</span>')
+      + `<div style="color:#4ade80;margin-top:4px;">✓ 排序完成! 左侧最活泼(易反应) ← → 右侧最不活泼(稳定)</div>`;
+  } else {
+    highlights.clear();
+    draw();
+    statTime.textContent = '已中断';
+    reactionLog.innerHTML = '<span style="color:#f87171;">⚠ 排序已中断</span>';
+  }
+
+  running = false;
+  btnStart.disabled = false;
+  btnReset.disabled = false;
+  sizeSlider.disabled = false;
+}
+
+function stopSort() { if (running) abortFlag = true; }
+
+function resetArray() {
+  if (running) return;
+  highlights.clear();
+  comparisons = 0; swaps = 0;
+  statComps.textContent = '0';
+  statSwaps.textContent = '0';
+  statTime.textContent = '--';
+  logLines = [];
+  reactionLog.innerHTML = '<span style="color:#6b7080;">🔬 反应日志 — 等待排序开始...</span>';
+  metals = buildMetals(arrSize);
+  statSize.textContent = arrSize;
+  resizeCanvas();
+  draw();
+}
+
+/* ============================================================
+   参数
+   ============================================================ */
+sizeSlider.addEventListener('input', () => {
+  arrSize = parseInt(sizeSlider.value);
+  sizeVal.textContent = arrSize;
+  if (!running) resetArray();
+});
+speedSlider.addEventListener('input', () => {
+  speed = parseInt(speedSlider.value);
+  speedVal.textContent = speed;
+});
+
+/* ============================================================
+   算法切换
+   ============================================================ */
+function switchAlgo(algo) {
+  if (running) return;
+  algorithm = algo;
+  btnQuick.classList.toggle('active', algo === 'quick');
+  btnMerge.classList.toggle('active', algo === 'merge');
+  algoIcon.textContent = algo === 'quick' ? '⚡' : '🧩';
+  algoTitle.textContent = algo === 'quick' ? '快速排序' : '归并排序';
+  highlights.clear();
+  draw();
+}
+
+/* ============================================================
+   事件
+   ============================================================ */
+btnQuick.addEventListener('click', () => switchAlgo('quick'));
+btnMerge.addEventListener('click', () => switchAlgo('merge'));
+btnStart.addEventListener('click', runSort);
+btnReset.addEventListener('click', resetArray);
+btnStop.addEventListener('click', stopSort);
+
+/* ============================================================
+   启动
+   ============================================================ */
+resetArray();
+</script>
+</body>
+</html>
