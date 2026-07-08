@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(g++ -std=c++17 -O2 sort_demo.cpp -o sort_demo)"
-    ]
-  }
-}
